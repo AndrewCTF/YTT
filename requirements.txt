@@ -1,0 +1,11 @@
+requests>=2.31.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.0
+yt-dlp>=2024.0.0
+faster-whisper>=1.0.0
+aiosqlite>=0.20.0
+click>=8.1.0
+rich>=13.0.0
+
+# PyTorch with CUDA 12.8 support (run separately after installing base requirements)
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128

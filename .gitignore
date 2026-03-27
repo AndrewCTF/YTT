@@ -1,0 +1,9 @@
+.transcript_cache.db
+_pycache__/
+.tmp/
+.venv/
+.claude/settings.local.json
+CLAUDE.md
+*.pyc
+*.whl
+*.dll
