@@ -305,6 +305,7 @@ ytt/
 │   ├── searcher.py          # YouTube search
 │   ├── search_cache.py      # Search result cache
 │   ├── search_service.py    # Search orchestrator
+│   ├── cuda_dll_manager.py  # Auto-download CUDA libraries
 │   └── exceptions.py        # Custom exceptions
 ├── mcp_server/
 │   ├── __init__.py
