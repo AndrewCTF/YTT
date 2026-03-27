@@ -11,30 +11,49 @@ via pip (nvidia-cublas-cu12, nvidia-cuda-runtime-cu12, etc.)
 import os
 import sys
 import subprocess
+import platform
 from pathlib import Path
 from typing import Optional
 
 
 def _get_cuda_dll_path() -> Optional[Path]:
     """Get the path to CUDA DLLs if they exist."""
-    # Check common CUDA installation paths on Windows
-    cuda_paths = [
-        Path(os.environ.get("CUDA_PATH", "")) / "bin",
-        Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.x/bin"),
-        Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.x/bin"),
-    ]
+    system = platform.system()
 
-    for cuda_path in cuda_paths:
+    # Check CUDA_PATH environment variable first
+    cuda_path_env = os.environ.get("CUDA_PATH")
+    if cuda_path_env:
+        cuda_bin = Path(cuda_path_env) / "bin"
+        if cuda_bin.exists():
+            return cuda_bin
+
+    # Check for NVIDIA GPU Computing Toolkit (common on Windows)
+    if system == "Windows":
+        nvidia_base = Path("C:/Program Files/NVIDIA GPU Computing Toolkit")
+        if nvidia_base.exists():
+            for cuda_dir in sorted(nvidia_base.iterdir(), reverse=True):
+                if cuda_dir.name.startswith("CUDA"):
+                    cuda_bin = cuda_dir / "bin"
+                    if cuda_bin.exists():
+                        return cuda_bin
+
+    # Check for system CUDA installation (Linux/Mac)
+    if system == "Linux":
+        for cuda_path in ["/usr/local/cuda/lib64", "/opt/cuda/lib64"]:
+            if Path(cuda_path).exists():
+                return Path(cuda_path)
+    elif system == "Darwin":
+        cuda_path = Path("/usr/local/cuda/lib")
         if cuda_path.exists():
             return cuda_path
 
     # Check if NVIDIA packages were installed via pip in venv
-    if hasattr(sys, "_base_executable"):
-        venv_path = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
-        if venv_path.exists():
-            # nvidia-cublas-cu12 puts DLLs in nvidia/cublas/lib
-            for subdir in ["cublas", "cuda_runtime", "cudart"]:
-                dll_path = venv_path / subdir / "lib"
+    venv_path = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
+    if venv_path.exists():
+        # nvidia-cublas-cu12 puts DLLs in nvidia/cublas/lib or nvidia/cublas/lib64
+        for subdir in ["cublas", "cuda_runtime", "cudart"]:
+            for lib_dir in ["lib", "lib64"]:
+                dll_path = venv_path / subdir / lib_dir
                 if dll_path.exists():
                     return dll_path
 
@@ -45,11 +64,19 @@ def _find_cublas_dlls() -> list[Path]:
     """Find all available cuBLAS DLL files."""
     dlls = []
     cuda_path = _get_cuda_dll_path()
+    system = platform.system()
 
     if cuda_path and cuda_path.exists():
-        dlls.extend(cuda_path.glob("cublas*.dll"))
-        dlls.extend(cuda_path.glob("cudart*.dll"))
-        dlls.extend(cuda_path.glob("nvJit*.dll"))
+        # Different extensions per platform
+        if system == "Windows":
+            dlls.extend(cuda_path.glob("cublas*.dll"))
+            dlls.extend(cuda_path.glob("cudart*.dll"))
+            dlls.extend(cuda_path.glob("nvJit*.dll"))
+        else:
+            # Linux/Mac - .so or .dylib
+            dlls.extend(cuda_path.glob("libcublas*.so*"))
+            dlls.extend(cuda_path.glob("libcudart*.so*"))
+            dlls.extend(cuda_path.glob("libnvJit*.so*"))
 
     return dlls
 

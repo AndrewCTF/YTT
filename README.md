@@ -168,7 +168,7 @@ Or integrate with Claude Desktop by adding to your MCP settings:
     "yt-transcript": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/ytt"
+      "cwd": "/absolute/path/to/ytt"
     }
   }
 }

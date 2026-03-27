@@ -248,7 +248,7 @@ Open Claude Desktop settings and add a new MCP server:
     "yt-transcript": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "C:\\Users\\Andrew\\Documents\\Projects\\YTtranscripts"
+      "cwd": "/absolute/path/to/ytt"
     }
   }
 }
@@ -277,7 +277,7 @@ Add to Cursor settings (`~/.cursor/mcp.json` on macOS, `%APPDATA%\Cursor\mcp.jso
       "command": "python",
       "args": ["-m", "mcp_server.server"],
       "env": {
-        "PYTHONPATH": "C:\\Users\\Andrew\\Documents\\Projects\\YTtranscripts"
+        "PYTHONPATH": "/absolute/path/to/ytt"
       }
     }
   }
@@ -294,7 +294,7 @@ Add to your `~/.continue/config.py`:
         "yt-transcript": {
             "command": "python",
             "args": ["-m", "mcp_server.server"],
-            "cwd": "/path/to/YTtranscripts"
+            "cwd": "/absolute/path/to/ytt"
         }
     }
 }
