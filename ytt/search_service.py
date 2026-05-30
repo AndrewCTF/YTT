@@ -3,6 +3,8 @@
 import asyncio
 from typing import Optional
 
+from .http import new_session
+from .rate_limiter import rate_limiter
 from .search_cache import search_cache, CachedSearchResult
 from .searcher import VideoSearchResult, search_videos_innertube
 from .service import get_transcript, ServiceResult
@@ -37,18 +39,18 @@ async def search(
         if cached:
             return [_cached_to_search_result(c) for c in cached[:max_results]]
 
-    # Step 2: Fetch from API
-    try:
-        loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(
-            None,
-            search_videos_innertube,
-            query,
-            max_results,
-            None,
-        )
-    except Exception as e:
-        raise e  # Re-raise SearchError or RateLimitError as-is
+    # Step 2: Fetch from API (rate-limited, retry/backoff inside the session).
+    await rate_limiter.acquire()
+    loop = asyncio.get_event_loop()
+
+    def _run() -> list[VideoSearchResult]:
+        session = new_session()
+        try:
+            return search_videos_innertube(query, max_results, session)
+        finally:
+            session.close()
+
+    results = await loop.run_in_executor(None, _run)
 
     # Step 3: Cache results
     if use_cache and results:
@@ -73,6 +75,7 @@ async def search_and_get_transcripts(
     max_results: int = 5,
     language: str = "en",
     use_cache: bool = True,
+    output_format: str = "clean",
 ) -> list[tuple[VideoSearchResult, Optional[ServiceResult]]]:
     """Search YouTube and fetch transcripts for results.
 
@@ -81,6 +84,7 @@ async def search_and_get_transcripts(
         max_results: Maximum number of search results.
         language: Language for transcripts.
         use_cache: Whether to use cache.
+        output_format: Transcript format ('clean' default, LLM-friendly).
 
     Returns:
         List of (search_result, transcript_or_none) tuples.
@@ -93,7 +97,7 @@ async def search_and_get_transcripts(
             transcript = await get_transcript(
                 video_result.video_id,
                 language=language,
-                output_format="text",
+                output_format=output_format,
                 use_cache=use_cache,
             )
             return transcript

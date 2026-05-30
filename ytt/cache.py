@@ -2,25 +2,22 @@
 
 import asyncio
 import json
-import sqlite3
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any
 
 import aiosqlite
 
-from config import config
+from .config import config
 
 
 @dataclass
 class CachedTranscript:
     """A cached transcript entry."""
+
     video_id: str
     language: str
-    source: str          # 'innertube' or 'whisper'
-    raw_data: dict       # JSON representation
+    source: str  # 'innertube' or 'whisper'
+    raw_data: dict  # JSON representation
     created_at: datetime
     expires_at: datetime
 
@@ -227,9 +224,7 @@ class TranscriptCache:
             expired = (await cursor.fetchone())[0]
 
             # By source
-            cursor = await db.execute(
-                "SELECT source, COUNT(*) FROM transcripts GROUP BY source"
-            )
+            cursor = await db.execute("SELECT source, COUNT(*) FROM transcripts GROUP BY source")
             by_source = dict(await cursor.fetchall())
 
         return {

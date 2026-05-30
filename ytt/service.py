@@ -1,12 +1,25 @@
-"""High-level service orchestrator for transcript fetching."""
+"""High-level service orchestrator for transcript fetching.
+
+Strategy (captions-first — fast, light, rate-limit resistant):
+
+1. Check the cache.
+2. Fetch YouTube's own captions via the Innertube API (a few KB, no audio
+   download) with retry/backoff and multi-client fallback.
+3. Only if captions are genuinely unavailable, fall back to local Whisper
+   transcription (downloads audio; requires the ``whisper`` extra).
+4. Format (``clean`` strips duplication/timestamps for LLM ingestion) and cache.
+"""
 
 import asyncio
 from dataclasses import dataclass
 
 from .cache import cache, CachedTranscript
-from .exceptions import WhisperError
+from .config import config
+from .exceptions import NoTranscriptFound, YouTubeTranscriptError
 from .fetcher import TranscriptData, fetch_transcript_innertube
 from .formatters import format_transcript
+from .http import new_session
+from .parser import extract_video_id
 from .rate_limiter import rate_limiter
 from .whisper_runner import WhisperResult, fetch_transcript_whisper
 
@@ -14,12 +27,28 @@ from .whisper_runner import WhisperResult, fetch_transcript_whisper
 @dataclass
 class ServiceResult:
     """Result from the transcript service."""
+
     video_id: str
     title: str
     language: str
-    source: str           # 'innertube' or 'whisper'
+    source: str  # 'innertube' or 'whisper'
     is_generated: bool
-    content: str          # Formatted transcript content
+    content: str  # Formatted transcript content
+
+
+async def _fetch_captions(video_id: str, language: str) -> TranscriptData:
+    """Fetch captions in a worker thread, rate-limited and session-pooled."""
+    await rate_limiter.acquire()
+    loop = asyncio.get_event_loop()
+
+    def _run() -> TranscriptData:
+        session = new_session()
+        try:
+            return fetch_transcript_innertube(video_id, language, session)
+        finally:
+            session.close()
+
+    return await loop.run_in_executor(None, _run)
 
 
 async def get_transcript(
@@ -31,106 +60,81 @@ async def get_transcript(
 ) -> ServiceResult:
     """Get a YouTube video transcript.
 
-    This is the main entry point for the transcript service. It:
-    1. Checks the cache first
-    2. Tries Whisper (fast, accurate, no rate limits)
-    3. Falls back to Innertube API on Whisper failure
-    4. Formats and returns the result
-
     Args:
         video_id_or_url: YouTube video ID or URL.
         language: Preferred language code (e.g., 'en', 'es').
-        output_format: Output format - 'text', 'json', 'srt', 'vtt'.
+        output_format: 'clean', 'text', 'json', 'srt', or 'vtt'.
+            'clean' is recommended for LLM ingestion (deduplicated, no timestamps).
         use_cache: Whether to use the cache (default: True).
-        use_whisper_fallback: If False, don't fall back to Innertube when Whisper fails (default: True).
+        use_whisper_fallback: Fall back to local Whisper if no captions exist
+            (default: True; requires the ``whisper`` extra).
 
     Returns:
         ServiceResult with formatted transcript content.
 
     Raises:
-        WhisperError: If both Whisper and Innertube fail, or Whisper fails and fallback is disabled.
+        YouTubeTranscriptError: If both captions and Whisper fail.
+        ValueError: If the video ID/URL is invalid.
     """
-    from .parser import extract_video_id
-
-    # Extract video ID if URL provided
     video_id = extract_video_id(video_id_or_url)
     if video_id is None:
         raise ValueError(f"Invalid video ID or URL: {video_id_or_url}")
 
-    # Step 1: Check cache
+    # Step 1: Cache.
     if use_cache:
         cached = await cache.get(video_id, language)
         if cached:
-            # Reconstruct transcript from cached data
-            if cached.source == "whisper":
-                transcript = _cached_to_whisper_result(cached)
-            else:
-                transcript = _cached_to_transcript_data(cached)
-
-            content = format_transcript(transcript, output_format)
+            transcript = _cached_to_transcript_data(cached)
             return ServiceResult(
                 video_id=video_id,
-                title=transcript.title if hasattr(transcript, 'title') else "",
-                language=transcript.language if hasattr(transcript, 'language') else language,
+                title=transcript.title,
+                language=transcript.language,
                 source=cached.source,
-                is_generated=False,
-                content=content,
+                is_generated=transcript.is_generated,
+                content=format_transcript(transcript, output_format),
             )
 
-    # Step 2: Try Whisper first (fast, accurate, no rate limits)
-    transcript = None
-    used_whisper = False
+    # Step 2: Captions first (fast, light, rate-limit resistant).
+    transcript: TranscriptData | None = None
+    source = "innertube"
+    captions_error: Exception | None = None
 
     try:
-        loop = asyncio.get_event_loop()
-        whisper_result = await loop.run_in_executor(
-            None,
-            fetch_transcript_whisper,
-            video_id,
-        )
+        transcript = await _fetch_captions(video_id, language)
+    except Exception as err:
+        captions_error = err
 
-        # Convert Whisper result to TranscriptData format for caching
-        transcript = _whisper_to_transcript_data(whisper_result)
-        used_whisper = True
-
-    except Exception as whisper_err:
-        # Whisper failed, try Innertube as fallback
+    # Step 3: Whisper fallback only when captions are unavailable.
+    if transcript is None:
         if not use_whisper_fallback:
-            raise WhisperError(f"Whisper failed: {whisper_err}")
-
+            raise captions_error or NoTranscriptFound(f"No captions found for {video_id}")
         try:
-            await rate_limiter.acquire()
-            transcript = await loop.run_in_executor(
-                None,
-                fetch_transcript_innertube,
-                video_id,
-                language,
-                None,
-            )
-        except Exception as innertube_err:
-            raise WhisperError(
-                f"Both Whisper ({whisper_err}) and Innertube ({innertube_err}) failed"
+            loop = asyncio.get_event_loop()
+            whisper_result = await loop.run_in_executor(None, fetch_transcript_whisper, video_id)
+            transcript = _whisper_to_transcript_data(whisper_result)
+            source = "whisper"
+        except Exception as whisper_err:
+            raise YouTubeTranscriptError(
+                f"Captions failed ({captions_error}); " f"Whisper fallback failed ({whisper_err})"
             )
 
-    # Step 3: Cache the result
+    # Step 4: Cache.
     if use_cache:
         await cache.set(
             video_id,
             language,
             _transcript_to_cache_dict(transcript),
-            source="whisper" if used_whisper else "innertube",
+            source=source,
         )
 
-    # Step 4: Format and return
-    content = format_transcript(transcript, output_format)
-
+    # Step 5: Format and return.
     return ServiceResult(
         video_id=video_id,
-        title=transcript.title if hasattr(transcript, 'title') else "",
-        language=transcript.language if hasattr(transcript, 'language') else language,
-        source="whisper" if used_whisper else "innertube",
-        is_generated=transcript.is_generated if hasattr(transcript, 'is_generated') else False,
-        content=content,
+        title=transcript.title,
+        language=transcript.language,
+        source=source,
+        is_generated=transcript.is_generated,
+        content=format_transcript(transcript, output_format),
     )
 
 
@@ -145,7 +149,7 @@ async def get_transcripts_batch(
     Args:
         video_ids: List of YouTube video IDs or URLs.
         language: Preferred language code (e.g., 'en', 'es').
-        output_format: Output format - 'text', 'json', 'srt', 'vtt'.
+        output_format: 'clean', 'text', 'json', 'srt', or 'vtt'.
         max_workers: Max concurrent transcriptions. Defaults to config.MAX_CONCURRENT_WORKERS.
 
     Returns:
@@ -232,31 +236,4 @@ def _cached_to_transcript_data(cached: CachedTranscript) -> TranscriptData:
             )
             for seg in raw.get("segments", [])
         ],
-    )
-
-
-def _cached_to_whisper_result(cached: CachedTranscript) -> WhisperResult:
-    """Reconstruct WhisperResult from cached dict."""
-    from .whisper_runner import WhisperSegment
-
-    raw = cached.raw_data
-    segments = []
-    for seg in raw.get("segments", []):
-        # Handle both start/end (whisper native) and start_ms/duration_ms (cached) formats
-        if "start" in seg and "end" in seg:
-            start = seg["start"]
-            end = seg["end"]
-        else:
-            start = seg["start_ms"] / 1000.0
-            end = start + seg["duration_ms"] / 1000.0
-        segments.append(WhisperSegment(
-            start=start,
-            end=end,
-            text=seg["text"],
-        ))
-    return WhisperResult(
-        video_id=raw["video_id"],
-        language=raw.get("language", cached.language),
-        segments=segments,
-        text=" ".join(seg["text"] for seg in raw.get("segments", [])),
     )

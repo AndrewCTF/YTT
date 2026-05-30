@@ -7,11 +7,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-import yt_dlp
-
-from config import config
+from .config import config
 from .exceptions import WhisperError
-
 
 # Model cache for reusing WhisperModel instances
 _model_cache: dict = {}
@@ -21,14 +18,16 @@ _cache_lock = threading.Lock()
 @dataclass
 class WhisperSegment:
     """A segment from Whisper transcription."""
+
     start: float  # seconds
-    end: float    # seconds
+    end: float  # seconds
     text: str
 
 
 @dataclass
 class WhisperResult:
     """Complete Whisper transcription result."""
+
     video_id: str
     language: str
     segments: list[WhisperSegment]
@@ -47,6 +46,7 @@ def _get_cuda_device() -> tuple[str, str]:
     if config.WHISPER_USE_GPU:
         try:
             import torch
+
             if torch.cuda.is_available():
                 return ("cuda", "float16")
         except Exception:
@@ -88,6 +88,7 @@ def _get_cached_model(model_size: str):
             batched = None
             try:
                 from faster_whisper import BatchedInferencePipeline
+
                 batched = BatchedInferencePipeline(model=model)
             except ImportError:
                 pass
@@ -96,6 +97,7 @@ def _get_cached_model(model_size: str):
         except Exception as e:
             if "cublas" in str(e).lower() or "cuda" in str(e).lower():
                 import warnings
+
                 warnings.warn(f"CUDA model creation failed ({e}), using CPU fallback")
             else:
                 raise
@@ -127,20 +129,33 @@ def download_audio(video_id: str) -> tuple[str, str]:
     Raises:
         WhisperError: If audio download fails.
     """
+    try:
+        import yt_dlp
+    except ImportError:
+        raise WhisperError(
+            "yt-dlp is required for the Whisper fallback. "
+            "Install with: pip install 'yttranscript-mcp[whisper]'"
+        )
+
     temp_dir = tempfile.mkdtemp(prefix="yt_transcript_")
     audio_path = os.path.join(temp_dir, "audio")
 
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': audio_path,
-        'quiet': True,
-        'no_warnings': True,
-        'extractaudio': True,
-        'audioformat': 'mp3',
-        'audioquality': '0',
-        'retries': 3,
-        'fragment_retries': 3,
+        "format": "bestaudio/best",
+        "outtmpl": audio_path,
+        "quiet": True,
+        "no_warnings": True,
+        "extractaudio": True,
+        "audioformat": "mp3",
+        "audioquality": "0",
+        "retries": 3,
+        "fragment_retries": 3,
     }
+    # Honour the same proxy / cookies escape hatches used by the captions path.
+    if config.PROXY:
+        ydl_opts["proxy"] = config.PROXY
+    if config.COOKIES_FILE:
+        ydl_opts["cookiefile"] = config.COOKIES_FILE
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -173,7 +188,6 @@ def transcribe_audio(audio_path: str, model_size: str = "base") -> WhisperResult
     Raises:
         WhisperError: If transcription fails.
     """
-    tried_cpu_fallback = False
     try:
         model, batched_model = _get_cached_model(model_size)
 
@@ -189,8 +203,8 @@ def transcribe_audio(audio_path: str, model_size: str = "base") -> WhisperResult
                 if "cublas" in str(e).lower():
                     # Cublas error during transcription - fall back to CPU
                     import warnings
+
                     warnings.warn(f"GPU transcription failed (cublas: {e}), falling back to CPU")
-                    tried_cpu_fallback = True
                     # Clear GPU model from cache
                     with _cache_lock:
                         gpu_key = f"{model_size}:cuda"
@@ -219,11 +233,13 @@ def transcribe_audio(audio_path: str, model_size: str = "base") -> WhisperResult
         full_text_parts = []
 
         for seg in segments:
-            result_segments.append(WhisperSegment(
-                start=seg.start,
-                end=seg.end,
-                text=seg.text.strip(),
-            ))
+            result_segments.append(
+                WhisperSegment(
+                    start=seg.start,
+                    end=seg.end,
+                    text=seg.text.strip(),
+                )
+            )
             full_text_parts.append(seg.text.strip())
 
         return WhisperResult(

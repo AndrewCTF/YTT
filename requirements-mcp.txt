@@ -1,1 +1,2 @@
-fastmcp>=0.1.0
+# MCP server dep. Preferred:  pip install "yttranscript-mcp[mcp]"
+fastmcp>=2.0.0

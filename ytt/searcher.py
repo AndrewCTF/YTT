@@ -1,18 +1,22 @@
 """YouTube search using Innertube Search API."""
 
-import re
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
 
-from config import config
-from .exceptions import SearchError, RateLimitError
+from .config import INNERTUBE_CLIENTS, config
+from .exceptions import SearchError
+from .http import request
+
+# Use the WEB client context for search (its renderers parse most cleanly).
+_WEB_CLIENT = next(c for c in INNERTUBE_CLIENTS if c["name"] == "WEB")
 
 
 @dataclass
 class VideoSearchResult:
     """A single video search result."""
+
     video_id: str
     title: str
     channel_name: str
@@ -20,39 +24,12 @@ class VideoSearchResult:
     view_count: str
 
 
-def extract_search_api_key() -> str:
-    """Extract Innertube API key from YouTube page HTML.
-
-    Uses the same approach as fetcher.py for consistency.
-    """
-    try:
-        response = requests.get(
-            "https://www.youtube.com/results",
-            params={"search_query": "test"},
-            timeout=10,
-        )
-        # YouTube embeds the API key in the page HTML
-        match = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', response.text)
-        if match:
-            return match.group(1)
-    except Exception:
-        pass
-
-    # Fallback to a known stable API key
-    return "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
-
-
 def build_search_payload(query: str) -> dict:
     """Build the Innertube search request payload."""
     return {
-        "context": {
-            "client": {
-                "clientName": config.INNERTUBE_CLIENT,
-                "clientVersion": config.INNERTUBE_CLIENT_VERSION,
-            }
-        },
+        "context": {"client": _WEB_CLIENT["context"]},
         "query": query,
-        "params": "EgIQAQ=="  # Videos only filter
+        "params": "EgIQAQ==",  # Videos-only filter
     }
 
 
@@ -103,11 +80,12 @@ def parse_search_response(response_data: dict) -> list[VideoSearchResult]:
             title = "".join(run.get("text", "") for run in title_runs) if title_runs else "Unknown"
 
             # Extract channel name (shortBylineText for compact, ownerText for videoRenderer)
-            channel_runs = (
-                video_renderer.get("shortBylineText", {}).get("runs", []) or
-                video_renderer.get("ownerText", {}).get("runs", [])
+            channel_runs = video_renderer.get("shortBylineText", {}).get(
+                "runs", []
+            ) or video_renderer.get("ownerText", {}).get("runs", [])
+            channel_name = (
+                "".join(run.get("text", "") for run in channel_runs) if channel_runs else "Unknown"
             )
-            channel_name = "".join(run.get("text", "") for run in channel_runs) if channel_runs else "Unknown"
 
             # Extract duration
             duration = video_renderer.get("lengthText", {})
@@ -118,18 +96,20 @@ def parse_search_response(response_data: dict) -> list[VideoSearchResult]:
 
             # Extract view count (shortViewCountText for compactVideoRenderer)
             view_count = (
-                video_renderer.get("shortViewCountText", {}).get("simpleText") or
-                video_renderer.get("viewCountText", {}).get("simpleText") or
-                "N/A"
+                video_renderer.get("shortViewCountText", {}).get("simpleText")
+                or video_renderer.get("viewCountText", {}).get("simpleText")
+                or "N/A"
             )
 
-            results.append(VideoSearchResult(
-                video_id=video_id,
-                title=title,
-                channel_name=channel_name,
-                duration=duration,
-                view_count=view_count,
-            ))
+            results.append(
+                VideoSearchResult(
+                    video_id=video_id,
+                    title=title,
+                    channel_name=channel_name,
+                    duration=duration,
+                    view_count=view_count,
+                )
+            )
 
     return results
 
@@ -156,27 +136,14 @@ def search_videos_innertube(
     if not query.strip():
         raise ValueError("Search query cannot be empty")
 
-    api_key = extract_search_api_key()
-    url = f"https://www.youtube.com/youtubei/v1/search?key={api_key}"
-
-    payload = build_search_payload(query)
-
-    if session is None:
-        session = requests.Session()
-
-    response = session.post(url, json=payload, timeout=10)
-
-    if response.status_code == 429:
-        retry_after = int(response.headers.get("Retry-After", 10))
-        raise RateLimitError(
-            f"Rate limited during search, retry after {retry_after}s",
-            retry_after=retry_after
-        )
-
-    if response.status_code == 403:
-        raise SearchError("Search forbidden (403) - possible IP block")
-
-    response.raise_for_status()
+    response = request(
+        "POST",
+        config.INNERTUBE_SEARCH_URL,
+        session=session,
+        headers=_WEB_CLIENT.get("headers"),
+        json=build_search_payload(query),
+        params={"key": config.INNERTUBE_API_KEY},
+    )
 
     try:
         data = response.json()

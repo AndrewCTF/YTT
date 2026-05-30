@@ -99,8 +99,9 @@ def ensure_cuda_dlls(force_download: bool = False) -> bool:
 
     # Check if NVIDIA packages are available via pip
     try:
-        import nvidia.cublas
-        import nvidia.cuda_runtime
+        import nvidia.cublas  # noqa: F401
+        import nvidia.cuda_runtime  # noqa: F401
+
         return True
     except ImportError:
         pass
@@ -170,6 +171,7 @@ def setup_gpu_if_needed(verbose: bool = True) -> tuple[bool, str]:
     # First check if GPU + CUDA already available
     try:
         import torch
+
         if torch.cuda.is_available():
             return True, "GPU already available"
     except ImportError:
@@ -184,6 +186,7 @@ def setup_gpu_if_needed(verbose: bool = True) -> tuple[bool, str]:
         # Verify installation
         try:
             import torch
+
             if torch.cuda.is_available():
                 return True, "GPU setup complete"
         except ImportError:

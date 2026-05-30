@@ -1,11 +1,20 @@
 """Format transcript data into various output formats."""
 
 import json
-from dataclasses import dataclass
 
+from .cleaner import clean_segments
 from .fetcher import TranscriptData
 from .parser import TimedText
-from .whisper_runner import WhisperResult, WhisperSegment
+from .whisper_runner import WhisperResult
+
+
+def format_transcript_clean(transcript: TranscriptData | WhisperResult) -> str:
+    """Format transcript as clean, deduplicated paragraphs for LLM ingestion.
+
+    Removes rolling auto-caption duplication, HTML entities and markup, and
+    drops timestamps — the most token-efficient representation.
+    """
+    return clean_segments(transcript.segments, paragraphs=True)
 
 
 def format_transcript_text(
@@ -221,7 +230,9 @@ def format_transcript(
     """
     format = format.lower().strip()
 
-    if format == "text":
+    if format == "clean":
+        return format_transcript_clean(transcript)
+    elif format == "text":
         return format_transcript_text(transcript)
     elif format == "json":
         return format_transcript_json(transcript)
@@ -230,4 +241,4 @@ def format_transcript(
     elif format == "vtt":
         return format_transcript_vtt(transcript)
     else:
-        raise ValueError(f"Unsupported format: {format}. Use: text, json, srt, vtt")
+        raise ValueError(f"Unsupported format: {format}. Use: clean, text, json, srt, vtt")

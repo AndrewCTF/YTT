@@ -5,13 +5,14 @@ from datetime import datetime, timedelta
 
 import aiosqlite
 
-from config import config
+from .config import config
 from .searcher import VideoSearchResult
 
 
 @dataclass
 class CachedSearchResult:
     """A cached search result entry."""
+
     query: str
     video_id: str
     rank: int
@@ -61,7 +62,7 @@ class SearchCache:
                 """SELECT * FROM search_results
                    WHERE query = ? AND expires_at > ?
                    ORDER BY rank""",
-                (query, datetime.now().isoformat())
+                (query, datetime.now().isoformat()),
             )
             rows = await cursor.fetchall()
 
@@ -70,17 +71,19 @@ class SearchCache:
 
         results = []
         for row in rows:
-            results.append(CachedSearchResult(
-                query=row["query"],
-                video_id=row["video_id"],
-                rank=row["rank"],
-                title=row["title"],
-                channel_name=row["channel"],
-                duration=row["duration"] or "N/A",
-                view_count=row["views"] or "N/A",
-                cached_at=datetime.fromisoformat(row["cached_at"]),
-                expires_at=datetime.fromisoformat(row["expires_at"]),
-            ))
+            results.append(
+                CachedSearchResult(
+                    query=row["query"],
+                    video_id=row["video_id"],
+                    rank=row["rank"],
+                    title=row["title"],
+                    channel_name=row["channel"],
+                    duration=row["duration"] or "N/A",
+                    view_count=row["views"] or "N/A",
+                    cached_at=datetime.fromisoformat(row["cached_at"]),
+                    expires_at=datetime.fromisoformat(row["expires_at"]),
+                )
+            )
 
         return results
 
@@ -101,8 +104,17 @@ class SearchCache:
                     """INSERT INTO search_results
                        (query, video_id, rank, title, channel, duration, views, cached_at, expires_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (query, result.video_id, rank, result.title, result.channel_name,
-                     result.duration, result.view_count, now.isoformat(), expires.isoformat())
+                    (
+                        query,
+                        result.video_id,
+                        rank,
+                        result.title,
+                        result.channel_name,
+                        result.duration,
+                        result.view_count,
+                        now.isoformat(),
+                        expires.isoformat(),
+                    ),
                 )
             await db.commit()
 
@@ -112,8 +124,7 @@ class SearchCache:
 
         async with aiosqlite.connect(config.CACHE_DB_PATH) as db:
             cursor = await db.execute(
-                "DELETE FROM search_results WHERE expires_at < ?",
-                (datetime.now().isoformat(),)
+                "DELETE FROM search_results WHERE expires_at < ?", (datetime.now().isoformat(),)
             )
             await db.commit()
             return cursor.rowcount

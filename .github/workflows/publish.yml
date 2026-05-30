@@ -23,8 +23,12 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
+      # --no-sources ensures the build matches what other tools produce.
       - name: Build
-        run: uv build
+        run: uv build --no-sources
 
+      # No credentials needed: PyPI Trusted Publisher uses the OIDC token granted
+      # by `id-token: write` above. Configure the publisher on PyPI to match this
+      # repo (AndrewCTF/YTT), workflow (publish.yml), and environment (pypi).
       - name: Publish
-        run: uv publish
+        run: uv publish --trusted-publishing always

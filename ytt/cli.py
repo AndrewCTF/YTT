@@ -10,10 +10,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from src.service import get_transcript, get_transcripts_batch
-from src.cache import cache
-from src.search_service import search, search_and_get_transcripts
-
+from .service import get_transcript, get_transcripts_batch
+from .cache import cache
+from .search_service import search, search_and_get_transcripts
 
 console = Console(legacy_windows=False, force_terminal=True)
 
@@ -44,18 +43,21 @@ def cli():
 @cli.command()
 @click.argument("video_id", callback=validate_video_id)
 @click.option(
-    "--language", "-l",
+    "--language",
+    "-l",
     default="en",
     help="Language code (e.g., en, es, fr, de)",
 )
 @click.option(
-    "--format", "-f",
-    type=click.Choice(["text", "json", "srt", "vtt"]),
-    default="text",
-    help="Output format",
+    "--format",
+    "-f",
+    type=click.Choice(["clean", "text", "json", "srt", "vtt"]),
+    default="clean",
+    help="Output format (clean = deduplicated, LLM-friendly)",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(),
     help="Output file (default: stdout)",
 )
@@ -109,18 +111,21 @@ def transcript(video_id, language, format, output, no_cache, no_whisper):
 @cli.command()
 @click.argument("video_ids", nargs=-1, callback=lambda ctx, param, values: values)
 @click.option(
-    "--language", "-l",
+    "--language",
+    "-l",
     default="en",
     help="Language code",
 )
 @click.option(
-    "--format", "-f",
-    type=click.Choice(["text", "json", "srt", "vtt"]),
-    default="text",
-    help="Output format",
+    "--format",
+    "-f",
+    type=click.Choice(["clean", "text", "json", "srt", "vtt"]),
+    default="clean",
+    help="Output format (clean = deduplicated, LLM-friendly)",
 )
 @click.option(
-    "--workers", "-w",
+    "--workers",
+    "-w",
     default=4,
     help="Max concurrent workers",
 )
@@ -167,15 +172,17 @@ def cache_stats(clean):
 
         stats = await cache.get_stats()
 
-        console.print(Panel(
-            f"""[bold]Cache Statistics[/bold]
+        console.print(
+            Panel(
+                f"""[bold]Cache Statistics[/bold]
 
 Total entries: {stats['total_entries']}
 Expired: {stats['expired_entries']}
 By source: {stats['entries_by_source']}
 """,
-            title="Cache",
-        ))
+                title="Cache",
+            )
+        )
 
     asyncio.run(do_cache())
 
@@ -183,13 +190,15 @@ By source: {stats['entries_by_source']}
 @cli.command()
 @click.argument("query")
 @click.option(
-    "--limit", "-n",
+    "--limit",
+    "-n",
     default=5,
     type=click.IntRange(1, 20),
     help="Number of results to return",
 )
 @click.option(
-    "--format", "-f",
+    "--format",
+    "-f",
     type=click.Choice(["text", "json", "table"]),
     default="table",
     help="Output format",
@@ -200,7 +209,8 @@ By source: {stats['entries_by_source']}
     help="Also fetch transcripts for each result",
 )
 @click.option(
-    "--language", "-l",
+    "--language",
+    "-l",
     default="en",
     help="Language for transcripts",
 )
@@ -234,6 +244,7 @@ def search_cmd(query, limit, format, with_transcripts, language, no_cache):
 
     if format == "json":
         import json
+
         output = []
         for r in results:
             if with_transcripts:
@@ -249,13 +260,15 @@ def search_cmd(query, limit, format, with_transcripts, language, no_cache):
                     item["transcript"] = transcript.content
                 output.append(item)
             else:
-                output.append({
-                    "video_id": r.video_id,
-                    "title": r.title,
-                    "channel": r.channel_name,
-                    "duration": r.duration,
-                    "views": r.view_count,
-                })
+                output.append(
+                    {
+                        "video_id": r.video_id,
+                        "title": r.title,
+                        "channel": r.channel_name,
+                        "duration": r.duration,
+                        "views": r.view_count,
+                    }
+                )
         console.print(json.dumps(output, indent=2))
     else:
         table = Table(title=f"Search Results: '{query}'")
@@ -266,7 +279,7 @@ def search_cmd(query, limit, format, with_transcripts, language, no_cache):
         table.add_column("Views", justify="right")
 
         for r in results:
-            video = r if hasattr(r, 'video_id') else r[0]
+            video = r if hasattr(r, "video_id") else r[0]
             title = video.title[:50] + "..." if len(video.title) > 50 else video.title
             table.add_row(
                 video.video_id,
@@ -279,7 +292,11 @@ def search_cmd(query, limit, format, with_transcripts, language, no_cache):
         console.print(table)
 
     if with_transcripts:
-        success_count = sum(1 for r in results if r[1] is not None) if results and not hasattr(results[0], 'video_id') else 0
+        success_count = (
+            sum(1 for r in results if r[1] is not None)
+            if results and not hasattr(results[0], "video_id")
+            else 0
+        )
         console.print(f"\n[dim]Transcripts fetched for {success_count}/{len(results)} videos[/dim]")
 
 

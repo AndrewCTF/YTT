@@ -1,13 +1,13 @@
 [project]
-name = "ytt"
-version = "0.1.0"
-description = "YouTube transcript fetcher with search - get transcripts via Whisper AI or Innertube API"
+name = "yttranscript-mcp"
+version = "0.2.0"
+description = "Fetch, clean, and search YouTube transcripts — captions-first (rate-limit resistant) with optional Whisper fallback and an MCP server"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "andrewctf", email = "andrew@example.com" }
+    { name = "AndrewCTF", email = "email.xryong@gmail.com" }
 ]
-keywords = ["youtube", "transcript", "whisper", "caption", "search"]
+keywords = ["youtube", "transcript", "captions", "whisper", "search", "mcp", "llm"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -16,22 +16,30 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: Linguistic",
 ]
 requires-python = ">=3.10"
 
+# Core install is intentionally light: the captions path needs no audio/ML deps.
 dependencies = [
     "requests>=2.31.0",
-    "httpx>=0.27.0",
-    "beautifulsoup4>=4.12.0",
-    "yt-dlp>=2024.0.0",
-    "faster-whisper>=1.0.0",
     "aiosqlite>=0.20.0",
     "click>=8.1.0",
     "rich>=13.0.0",
-    "fastmcp>=0.1.0",
 ]
 
 [project.optional-dependencies]
+# Local Whisper transcription fallback (downloads audio).
+whisper = [
+    "yt-dlp>=2024.0.0",
+    "faster-whisper>=1.0.0",
+]
+# Model Context Protocol server.
+mcp = [
+    "fastmcp>=2.0.0",
+]
+# GPU acceleration for Whisper.
 torch = [
     "torch>=2.0.0",
 ]
@@ -47,29 +55,32 @@ dev = [
 ]
 
 [project.scripts]
-ytt = "cli:cli"
+ytt = "ytt.cli:cli"
+yttranscript-mcp = "ytt.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/andrewctf/ytt"
-Repository = "https://github.com/andrewctf/ytt"
-Documentation = "https://github.com/andrewctf/ytt#readme"
+Homepage = "https://github.com/AndrewCTF/YTT"
+Repository = "https://github.com/AndrewCTF/YTT"
+Documentation = "https://github.com/AndrewCTF/YTT#readme"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["ytt"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/src",
-    "/cli.py",
-    "/main.py",
-    "/config.py",
+    "/ytt",
+    "/tests",
     "/README.md",
     "/QUICKSTART.md",
+    "/LICENSE",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.black]
 line-length = 100

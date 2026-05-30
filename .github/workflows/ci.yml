@@ -22,14 +22,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Tests are offline unit tests; only core + dev (+ mcp for import) needed.
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --extra dev --extra mcp
 
       - name: Run tests
         run: uv run pytest
 
       - name: Lint
-        run: uv run ruff check src/
+        run: uv run ruff check ytt/
 
       - name: Format check
-        run: uv run black --check src/
+        run: uv run black --check ytt/

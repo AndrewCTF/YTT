@@ -1,1 +1,0 @@
-"""MCP server package for YouTube transcript fetching."""

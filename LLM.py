@@ -1,259 +1,111 @@
-# Instructions for LLM Agents: Adding YouTube Transcript Tools to Yourself
+# Adding YouTube Transcript Tools to an LLM Agent (MCP)
 
-This document provides guidance for LLM agents (such as OpenCLAW, Claude Code, or other AI assistants) to add YouTube transcript and search capabilities to their toolset via the MCP (Model Context Protocol) protocol.
+This guide helps LLM agents (OpenCLAW, Claude Code, Cursor, etc.) add YouTube
+transcript + search capabilities via the Model Context Protocol (MCP).
 
-**Repository:** https://github.com/andrewctf/ytt
+**PyPI:** `yttranscript-mcp` · **Repo:** https://github.com/AndrewCTF/YTT
 
-## Overview
+## Install
 
-The `ytt` (YouTube Transcripts) project exposes the following tools via MCP:
+```bash
+pip install "yttranscript-mcp[mcp]"            # captions path (no audio/ML deps)
+pip install "yttranscript-mcp[mcp,whisper]"    # + local Whisper fallback (needs ffmpeg)
+```
 
-1. `get_transcript` - Fetch transcript for a single YouTube video
-2. `get_transcripts_batch` - Fetch transcripts for multiple videos concurrently
-3. `search_videos` - Search YouTube for videos matching a query, optionally fetching transcripts
+This installs the `yttranscript-mcp` console command that launches the server.
 
-## For OpenCLAW Agents
+## Tools exposed
 
-OpenCLAW supports MCP tools. To add this tool:
+1. `get_transcript` — transcript for one video
+2. `get_transcripts_batch` — transcripts for many videos, concurrently
+3. `search_videos` — search YouTube (optionally with transcripts)
+4. `setup_gpu` / `download_cuda` — optional CUDA setup for Whisper
 
-### Method 1: Via Configuration File
+All transcript tools default to the **`clean`** format: deduplicated,
+timestamp-free text optimized for LLM ingestion (fewest tokens).
 
-Add to your OpenCLAW configuration:
+## Configuration
+
+### Claude Code / Claude Desktop / Cursor
 
 ```json
 {
   "mcpServers": {
-    "ytt": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/ytt"
+    "yt-transcript": {
+      "command": "yttranscript-mcp"
     }
   }
 }
 ```
 
-### Method 2: Via openclaw tool command
-
-If OpenCLAW provides a tool-add command:
-
-```
-/tool-add ytt python -m mcp_server.server --cwd /path/to/ytt
-```
-
-## For Claude Code Agents
-
-Claude Code supports MCP servers. Add to your settings:
+Or run from a source checkout without installing:
 
 ```json
 {
   "mcpServers": {
     "yt-transcript": {
       "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/ytt"
+      "args": ["-m", "ytt.mcp.server"],
+      "cwd": "/absolute/path/to/YTT"
     }
   }
 }
 ```
 
-Or use the `/mcp` command to add servers dynamically.
+### Beating rate limits (optional env)
 
-## For Cursor IDE
-
-Add to `%APPDATA%\Cursor\mcp.json` (Windows) or `~/.cursor/mcp.json` (Mac/Linux):
+The captions path is already rate-limit resistant (browser headers, multi-client
+fallback, retry/backoff). From a throttled cloud IP, add:
 
 ```json
-{
-  "mcpServers": {
-    "ytt": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "env": {
-        "PYTHONPATH": "/path/to/ytt"
-      }
-    }
-  }
+"env": {
+  "YTT_PROXY": "http://user:pass@host:port",
+  "YTT_COOKIES_FILE": "/path/to/cookies.txt",
+  "YTT_MAX_RETRIES": "6"
 }
 ```
 
-## For VS Code (Continue Extension)
+`YTT_AUTO_DOWNLOAD_CUDA=1` enables on-demand download of NVIDIA CUDA libraries
+for GPU Whisper (avoids bundling NVIDIA binaries).
 
-Add to your `~/.continue/config.py`:
-
-```python
-from continue.sdk.core.main import ContinueSDK
-
-# In your config:
-{
-    "mcp_servers": {
-        "ytt": {
-            "command": "python",
-            "args": ["-m", "mcp_server.server"],
-            "cwd": "/path/to/ytt"
-        }
-    }
-}
-```
-
-## For Generic MCP-Compatible Agents
-
-### Step 1: Clone the Repository
-
-```bash
-git clone https://github.com/andrewctf/ytt.git
-cd ytt
-```
-
-### Step 2: Install Dependencies
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
-pip install -r requirements-mcp.txt
-```
-
-### Step 3: Add MCP Server Configuration
-
-Add to your agent's MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "ytt": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "cwd": "/absolute/path/to/ytt",
-      "env": {
-        "YTT_AUTO_DOWNLOAD_CUDA": "1"
-      }
-    }
-  }
-}
-```
-
-Setting `YTT_AUTO_DOWNLOAD_CUDA=1` enables automatic download of NVIDIA CUDA
-libraries when GPU acceleration is requested. This avoids bundling potentially
-copyrighted NVIDIA binaries directly in the repository.
-
-### Step 4: Verify
-
-Test by asking your agent:
-
-> "Search YouTube for 'Python tutorial' and get transcripts for the top 3 results"
-
-## Available Tools
+## Tool reference
 
 ### get_transcript
-
 ```
-get_transcript(video_id: str, language: str = "en", format: str = "text") -> str
+get_transcript(video_id: str, language: str = "en", format: str = "clean") -> str
 ```
-
-**Parameters:**
-- `video_id` - YouTube video ID or full URL
-- `language` - Language code (e.g., "en", "es", "fr")
-- `format` - Output format: "text", "json", "srt", or "vtt"
-
-**Returns:** Formatted transcript string
+`format`: `clean` (default), `text`, `json`, `srt`, `vtt`. Accepts a video ID or URL.
 
 ### get_transcripts_batch
-
 ```
-get_transcripts_batch(video_ids: list[str], language: str = "en", format: str = "text", max_workers: int = 4) -> list[dict]
+get_transcripts_batch(video_ids: list[str], language="en", format="clean", max_workers=4) -> list[dict]
 ```
-
-**Parameters:**
-- `video_ids` - List of YouTube video IDs or URLs
-- `language` - Language code
-- `format` - Output format
-- `max_workers` - Max concurrent transcription tasks
-
-**Returns:** List of results with `video_id`, `success`, `transcript`, `source`, `error`
+Each result: `video_id`, `success`, and either `transcript`/`source`/`language` or `error`.
 
 ### search_videos
-
 ```
-search_videos(query: str, max_results: int = 5, language: str = "en", with_transcripts: bool = False) -> list[dict]
+search_videos(query: str, max_results=5, language="en", with_transcripts=False, format="clean") -> list[dict]
 ```
+Returns `video_id`, `title`, `channel_name`, `duration`, `view_count`, and
+(when `with_transcripts=True`) `transcript`.
 
-**Parameters:**
-- `query` - Search query string
-- `max_results` - Max number of results (default 5, max 20)
-- `language` - Language for transcripts
-- `with_transcripts` - If True, fetch transcripts for each result
+## How it works
 
-**Returns:** List of video results with `video_id`, `title`, `channel_name`, `duration`, `view_count`, and optionally `transcript`
-
-### setup_gpu
-
-```
-setup_gpu() -> dict
-```
-
-Downloads and sets up NVIDIA CUDA libraries for GPU acceleration.
-Only downloads if `YTT_AUTO_DOWNLOAD_CUDA=1` is set in environment.
-
-**Returns:** Dict with `success` and `message` keys
-
-### download_cuda
-
-```
-download_cuda() -> dict
-```
-
-Manually triggers download of NVIDIA CUDA runtime packages.
-Downloads nvidia-cublas-cu12, nvidia-cuda-runtime-cu12, nvidia-cudnn-cu12.
-
-**Returns:** Dict with `success`, `message`, and `packages` keys
-
-## Implementation Notes
-
-- **No API keys required** - Uses YouTube's internal Innertube API and Whisper AI
-- **Rate limiting** - Innertube API calls are rate-limited; use caching to avoid repeated calls
-- **Whisper fallback** - If Innertube captions unavailable, automatically falls back to Whisper transcription
-- **Local processing** - Whisper runs locally (CPU or GPU), no external API calls for transcription
+- **Captions first** via the Innertube API (ANDROID_VR → WEB → MWEB → watch-page
+  fallback). Fast, a few KB per video, no API key, no audio download.
+- **Whisper fallback** only when a video has no captions (downloads audio,
+  transcribes locally; requires the `whisper` extra + `ffmpeg`).
+- **SQLite cache** avoids redundant fetches.
 
 ## Troubleshooting
 
-### "Module not found" errors
-Ensure all dependencies are installed:
-```bash
-pip install -r requirements.txt
-pip install -r requirements-mcp.txt
-```
+- **`yttranscript-mcp: command not found`** — ensure the venv with the package is
+  active, or use the `python -m ytt.mcp.server` form with `cwd` set.
+- **`ffmpeg not found`** — only needed for the Whisper fallback; install ffmpeg.
+- **Persistent throttling** — set `YTT_PROXY` and/or `YTT_COOKIES_FILE`.
 
-### "ffmpeg not found"
-Install ffmpeg:
-- Windows: `winget install ffmpeg`
-- macOS: `brew install ffmpeg`
-- Linux: `sudo apt install ffmpeg`
+## Example prompts
 
-### "cublas not found" or GPU errors
-CUDA libraries are not bundled to avoid copyright issues. Set `YTT_AUTO_DOWNLOAD_CUDA=1`
-to enable automatic download, or call the `download_cuda()` tool:
-
-```python
-# In your agent, call:
-download_cuda()  # Downloads nvidia-cublas-cu12, etc.
-```
-
-Or set environment variable before starting the MCP server:
-```bash
-YTT_AUTO_DOWNLOAD_CUDA=1 python -m mcp_server.server
-```
-
-### Connection issues
-The MCP server must be running. Start it with:
-```bash
-python -m mcp_server.server
-```
-
-## Example Usage in Conversations
-
-When this tool is properly configured, you can ask:
-
-- "Get the transcript for this video: https://www.youtube.com/watch?v=VIDEO_ID"
-- "Search for 'machine learning tutorial' and get the top 5 results with transcripts"
-- "Find YouTube videos about Python programming and summarize what each video is about"
-- "Compare the transcripts of these two videos: VIDEO_ID_1 and VIDEO_ID_2"
+- "Get the transcript for https://www.youtube.com/watch?v=VIDEO_ID"
+- "Search YouTube for 'machine learning tutorial' and summarize the top 3."
+- "Compare the transcripts of VIDEO_ID_1 and VIDEO_ID_2."

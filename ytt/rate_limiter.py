@@ -20,9 +20,9 @@ class RateLimiter:
         last_refill: Timestamp of last token refill.
     """
 
-    rate: float = 0.5        # tokens per second
-    burst: int = 5           # max tokens (bucket size)
-    tokens: float = 5.0      # current tokens
+    rate: float = 0.5  # tokens per second
+    burst: int = 5  # max tokens (bucket size)
+    tokens: float = 5.0  # current tokens
     last_refill: float = None
 
     def __post_init__(self):
