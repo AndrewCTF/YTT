@@ -43,3 +43,9 @@ class SearchError(YouTubeTranscriptError):
     """Raised when YouTube search fails."""
 
     pass
+
+
+class SummarizerError(YouTubeTranscriptError):
+    """Raised when local-LLM summarization fails (provider unreachable, etc.)."""
+
+    pass

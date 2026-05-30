@@ -67,3 +67,18 @@ def test_to_paragraphs_sentence_aware():
 def test_estimate_tokens():
     assert estimate_tokens("a" * 40) == 10
     assert estimate_tokens("") == 1
+
+
+def test_merge_overlap_search_is_bounded():
+    # CWE-407 guard: a huge single cue must not trigger near-quadratic work.
+    # The overlap window is capped, so the inner loop is O(MAX_OVERLAP_SEARCH)
+    # per cue regardless of cue size. Real rolling overlaps (a few words) are
+    # unaffected; only pathological multi-thousand-word identical cues see a
+    # capped (still-correct-enough) merge.
+    from ytt.cleaner import MAX_OVERLAP_SEARCH
+
+    assert MAX_OVERLAP_SEARCH <= 1024
+    big = " ".join(["word"] * 5000)
+    out = merge_overlapping([big, big])
+    # Exactly MAX_OVERLAP_SEARCH words of overlap are removed (the bound).
+    assert len(out.split()) == 2 * 5000 - MAX_OVERLAP_SEARCH

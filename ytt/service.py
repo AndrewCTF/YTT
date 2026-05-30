@@ -12,6 +12,7 @@ Strategy (captions-first — fast, light, rate-limit resistant):
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
 
 from .cache import cache, CachedTranscript
 from .config import config
@@ -21,6 +22,7 @@ from .formatters import format_transcript
 from .http import new_session
 from .parser import extract_video_id
 from .rate_limiter import rate_limiter
+from .summarizer import summarize_text
 from .whisper_runner import WhisperResult, fetch_transcript_whisper
 
 
@@ -34,6 +36,29 @@ class ServiceResult:
     source: str  # 'innertube' or 'whisper'
     is_generated: bool
     content: str  # Formatted transcript content
+
+
+async def _render(
+    transcript: TranscriptData,
+    output_format: str,
+    summary_model: str | None = None,
+    summary_provider: str | None = None,
+) -> str:
+    """Format a transcript, handling the network-backed ``summary`` format.
+
+    ``summary`` cleans the transcript then runs a local LLM (off-thread) to
+    produce a short summary — the token-saving path. All other formats are pure.
+    The model/provider are passed as arguments (never via shared global state),
+    so concurrent requests with different overrides don't interfere.
+    """
+    if output_format == "summary":
+        clean = format_transcript(transcript, "clean")
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(summarize_text, clean, model=summary_model, provider=summary_provider),
+        )
+    return format_transcript(transcript, output_format)
 
 
 async def _fetch_captions(video_id: str, language: str) -> TranscriptData:
@@ -57,17 +82,23 @@ async def get_transcript(
     output_format: str = "text",
     use_cache: bool = True,
     use_whisper_fallback: bool = True,
+    summary_model: str | None = None,
+    summary_provider: str | None = None,
 ) -> ServiceResult:
     """Get a YouTube video transcript.
 
     Args:
         video_id_or_url: YouTube video ID or URL.
         language: Preferred language code (e.g., 'en', 'es').
-        output_format: 'clean', 'text', 'json', 'srt', or 'vtt'.
+        output_format: 'clean', 'text', 'json', 'srt', 'vtt', or 'summary'.
             'clean' is recommended for LLM ingestion (deduplicated, no timestamps).
+            'summary' runs a local LLM (requires a reachable provider; raises
+            SummarizerError otherwise).
         use_cache: Whether to use the cache (default: True).
         use_whisper_fallback: Fall back to local Whisper if no captions exist
             (default: True; requires the ``whisper`` extra).
+        summary_model: Override the local summary model (only for 'summary').
+        summary_provider: Override the summary provider (only for 'summary').
 
     Returns:
         ServiceResult with formatted transcript content.
@@ -91,7 +122,7 @@ async def get_transcript(
                 language=transcript.language,
                 source=cached.source,
                 is_generated=transcript.is_generated,
-                content=format_transcript(transcript, output_format),
+                content=await _render(transcript, output_format, summary_model, summary_provider),
             )
 
     # Step 2: Captions first (fast, light, rate-limit resistant).
@@ -134,7 +165,7 @@ async def get_transcript(
         language=transcript.language,
         source=source,
         is_generated=transcript.is_generated,
-        content=format_transcript(transcript, output_format),
+        content=await _render(transcript, output_format, summary_model, summary_provider),
     )
 
 
@@ -143,14 +174,18 @@ async def get_transcripts_batch(
     language: str = "en",
     output_format: str = "text",
     max_workers: int | None = None,
+    summary_model: str | None = None,
+    summary_provider: str | None = None,
 ) -> list[ServiceResult | Exception]:
     """Get transcripts for multiple videos concurrently.
 
     Args:
         video_ids: List of YouTube video IDs or URLs.
         language: Preferred language code (e.g., 'en', 'es').
-        output_format: 'clean', 'text', 'json', 'srt', or 'vtt'.
+        output_format: 'clean', 'text', 'json', 'srt', 'vtt', or 'summary'.
         max_workers: Max concurrent transcriptions. Defaults to config.MAX_CONCURRENT_WORKERS.
+        summary_model: Override the local summary model (only for 'summary').
+        summary_provider: Override the summary provider (only for 'summary').
 
     Returns:
         List of (ServiceResult | Exception) - one per video_id.
@@ -167,6 +202,8 @@ async def get_transcripts_batch(
                     vid,
                     language=language,
                     output_format=output_format,
+                    summary_model=summary_model,
+                    summary_provider=summary_provider,
                 )
             except Exception as e:
                 return e

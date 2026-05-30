@@ -14,6 +14,12 @@ import re
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
+# Rolling-caption overlap is at most a handful of words. Capping the overlap
+# search window keeps merge_overlapping linear in the input and prevents a
+# crafted caption track (a few thousand words in one cue) from forcing
+# near-quadratic work (CWE-407).
+MAX_OVERLAP_SEARCH = 256
+
 
 def _normalize(text: str) -> str:
     """Decode entities, strip markup, collapse whitespace for one cue."""
@@ -42,7 +48,7 @@ def merge_overlapping(texts: list[str]) -> str:
         seg_words = seg.split()
         seg_lower = [w.lower() for w in seg_words]
 
-        max_k = min(len(words), len(seg_words))
+        max_k = min(len(words), len(seg_words), MAX_OVERLAP_SEARCH)
         overlap = 0
         for k in range(max_k, 0, -1):
             if lowered[-k:] == seg_lower[:k]:

@@ -61,7 +61,35 @@ async def main():
 asyncio.run(main())
 ```
 
-`output_format`: `clean` (default for the CLI/MCP), `text`, `json`, `srt`, `vtt`.
+`output_format`: `clean` (default for the CLI/MCP), `text`, `json`, `srt`, `vtt`, `summary`.
+
+## Local summarization (save tokens)
+
+Compress a transcript to a short summary with a **local** LLM, so the agent that
+consumes it ingests a summary instead of the whole transcript. Nothing leaves
+the machine. Opt-in; needs a local model (default [Ollama](https://ollama.com)).
+
+```bash
+ollama serve
+ollama pull qwen3.6:27b      # default — smaller: qwen3:8b, qwen3:4b, qwen3.5:2b
+```
+
+```bash
+ytt transcript VIDEO_ID --summarize
+ytt transcript VIDEO_ID --summarize --summary-model qwen3:8b
+```
+
+```python
+from ytt import get_transcript
+r = await get_transcript("VIDEO_ID", output_format="summary")
+print(r.content)   # bullet-point summary
+```
+
+- Long transcripts are summarized map-reduce (chunk → reduce) to fit context.
+- `YTT_SUMMARY_KEEP_ALIVE` keeps the model hot between calls (`-1` = forever).
+- `YTT_SUMMARY_AUTO_PULL=1` pulls a missing model on demand.
+- `YTT_SUMMARY_PROVIDER=openai` targets any OpenAI-compatible server
+  (llama.cpp, LM Studio, vLLM) via `YTT_SUMMARY_OPENAI_BASE`.
 
 ## MCP server
 
@@ -81,7 +109,7 @@ Claude Desktop / Cursor config:
 }
 ```
 
-Tools: `get_transcript`, `get_transcripts_batch`, `search_videos` (all default to the `clean` format), plus `setup_gpu` / `download_cuda`.
+Tools: `get_transcript`, `get_transcripts_batch`, `search_videos` (all default to the `clean` format), `summarize_video` (local-LLM summary), plus `setup_gpu` / `download_cuda`.
 
 ## Configuration (environment variables)
 
@@ -98,6 +126,11 @@ Everything is tunable without code via `YTT_*` env vars:
 | `YTT_CACHE_TTL_DAYS` | `7` | Cache TTL |
 | `YTT_WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large` |
 | `YTT_WHISPER_GPU` | `true` | Use GPU for Whisper if available |
+| `YTT_SUMMARY_PROVIDER` | `ollama` | `ollama` or `openai` (OpenAI-compatible) |
+| `YTT_SUMMARY_MODEL` | `qwen3.6:27b` | Local summary model |
+| `YTT_OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
+| `YTT_SUMMARY_KEEP_ALIVE` | `5m` | Keep model hot (`-1` = forever) |
+| `YTT_SUMMARY_AUTO_PULL` | `false` | Pull missing model on demand |
 
 ## How it works
 

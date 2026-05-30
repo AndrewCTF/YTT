@@ -76,6 +76,7 @@ async def search_and_get_transcripts(
     language: str = "en",
     use_cache: bool = True,
     output_format: str = "clean",
+    summary_model: str | None = None,
 ) -> list[tuple[VideoSearchResult, Optional[ServiceResult]]]:
     """Search YouTube and fetch transcripts for results.
 
@@ -84,7 +85,8 @@ async def search_and_get_transcripts(
         max_results: Maximum number of search results.
         language: Language for transcripts.
         use_cache: Whether to use cache.
-        output_format: Transcript format ('clean' default, LLM-friendly).
+        output_format: 'clean' (default), 'text', 'json', 'srt', 'vtt', or 'summary'.
+        summary_model: Override the local summary model (only for 'summary').
 
     Returns:
         List of (search_result, transcript_or_none) tuples.
@@ -99,6 +101,7 @@ async def search_and_get_transcripts(
                 language=language,
                 output_format=output_format,
                 use_cache=use_cache,
+                summary_model=summary_model,
             )
             return transcript
         except Exception:

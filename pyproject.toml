@@ -1,6 +1,6 @@
 [project]
 name = "yttranscript-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fetch, clean, and search YouTube transcripts — captions-first (rate-limit resistant) with optional Whisper fallback and an MCP server"
 readme = "README.md"
 license = { text = "MIT" }
@@ -76,6 +76,7 @@ include = [
     "/tests",
     "/README.md",
     "/QUICKSTART.md",
+    "/llms.md",
     "/LICENSE",
 ]
 

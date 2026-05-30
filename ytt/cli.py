@@ -51,9 +51,19 @@ def cli():
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["clean", "text", "json", "srt", "vtt"]),
+    type=click.Choice(["clean", "text", "json", "srt", "vtt", "summary"]),
     default="clean",
-    help="Output format (clean = deduplicated, LLM-friendly)",
+    help="Output format (clean = deduplicated, LLM-friendly; summary = local-LLM summary)",
+)
+@click.option(
+    "--summarize",
+    is_flag=True,
+    help="Summarize with a local LLM to save tokens (same as --format summary)",
+)
+@click.option(
+    "--summary-model",
+    default=None,
+    help="Override the local summary model (default: qwen3.6:27b)",
 )
 @click.option(
     "--output",
@@ -71,8 +81,10 @@ def cli():
     is_flag=True,
     help="Disable Whisper fallback",
 )
-def transcript(video_id, language, format, output, no_cache, no_whisper):
+def transcript(video_id, language, format, summarize, summary_model, output, no_cache, no_whisper):
     """Get transcript for a YouTube video."""
+    if summarize:
+        format = "summary"
 
     async def fetch():
         return await get_transcript(
@@ -81,6 +93,7 @@ def transcript(video_id, language, format, output, no_cache, no_whisper):
             output_format=format,
             use_cache=not no_cache,
             use_whisper_fallback=not no_whisper,
+            summary_model=summary_model,
         )
 
     console.print("Fetching transcript...")
@@ -119,9 +132,14 @@ def transcript(video_id, language, format, output, no_cache, no_whisper):
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["clean", "text", "json", "srt", "vtt"]),
+    type=click.Choice(["clean", "text", "json", "srt", "vtt", "summary"]),
     default="clean",
-    help="Output format (clean = deduplicated, LLM-friendly)",
+    help="Output format (clean = deduplicated; summary = local-LLM summary)",
+)
+@click.option(
+    "--summary-model",
+    default=None,
+    help="Override the local summary model (default: qwen3.6:27b)",
 )
 @click.option(
     "--workers",
@@ -129,7 +147,7 @@ def transcript(video_id, language, format, output, no_cache, no_whisper):
     default=4,
     help="Max concurrent workers",
 )
-def batch(video_ids, language, format, workers):
+def batch(video_ids, language, format, summary_model, workers):
     """Get transcripts for multiple videos."""
 
     if not video_ids:
@@ -142,6 +160,7 @@ def batch(video_ids, language, format, workers):
             language=language,
             output_format=format,
             max_workers=workers,
+            summary_model=summary_model,
         )
 
     console.print(f"Fetching transcripts for {len(video_ids)} videos (workers={workers})...")

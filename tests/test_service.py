@@ -39,6 +39,35 @@ def test_captions_first_and_clean(monkeypatch):
     assert result.content == "hello world this is a test"
 
 
+def test_summary_format_uses_local_llm(monkeypatch):
+    def fake_fetch(video_id, language, session):
+        return _transcript(["hello world this", "world this is a test"])
+
+    captured = {}
+
+    def fake_summarize(text, model=None, provider=None):
+        captured["text"] = text
+        captured["model"] = model
+        return "• key point"
+
+    monkeypatch.setattr(service, "fetch_transcript_innertube", fake_fetch)
+    monkeypatch.setattr(service, "summarize_text", fake_summarize)
+
+    result = asyncio.run(
+        service.get_transcript(
+            "abcdefghijk",
+            output_format="summary",
+            use_cache=False,
+            summary_model="qwen3:8b",
+        )
+    )
+    assert result.content == "• key point"
+    # The summarizer receives cleaned (deduplicated) text, not raw segments.
+    assert captured["text"] == "hello world this is a test"
+    # The per-request model override is threaded through (no global mutation).
+    assert captured["model"] == "qwen3:8b"
+
+
 def test_whisper_fallback_when_no_captions(monkeypatch):
     def fake_fetch(video_id, language, session):
         raise NoTranscriptFound("none")

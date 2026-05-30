@@ -90,13 +90,48 @@ async def get_transcript(
         video_id: YouTube video ID or URL.
         language: Language code (e.g., 'en', 'es').
         format: 'clean' (default, deduplicated and LLM-friendly), 'text',
-            'json', 'srt', or 'vtt'.
+            'json', 'srt', 'vtt', or 'summary' (local-LLM summary).
 
     Returns:
         Formatted transcript string.
     """
     result = await _get_transcript(video_id, language=language, output_format=format)
     return result.content
+
+
+@mcp.tool()
+async def summarize_video(
+    video_id: str,
+    language: str = "en",
+    model: str | None = None,
+) -> dict:
+    """Summarize a YouTube video with a LOCAL LLM to save tokens.
+
+    Fetches captions, cleans them, and runs a local model (Ollama by default,
+    e.g. qwen3.6:27b) so you ingest a short summary instead of the full
+    transcript. Requires a running local LLM; nothing is sent to the cloud.
+
+    Args:
+        video_id: YouTube video ID or URL.
+        language: Language code (e.g., 'en', 'es').
+        model: Optional override of the local model (default: qwen3.6:27b).
+
+    Returns:
+        Dict with video_id, source, language, and summary (or error).
+    """
+    try:
+        result = await _get_transcript(
+            video_id, language=language, output_format="summary", summary_model=model
+        )
+        return {
+            "video_id": result.video_id,
+            "success": True,
+            "source": result.source,
+            "language": result.language,
+            "summary": result.content,
+        }
+    except Exception as e:
+        return {"video_id": video_id, "success": False, "error": str(e)}
 
 
 @mcp.tool()
@@ -111,7 +146,7 @@ async def get_transcripts_batch(
     Args:
         video_ids: List of YouTube video IDs or URLs.
         language: Language code (e.g., 'en', 'es').
-        format: 'clean' (default), 'text', 'json', 'srt', or 'vtt'.
+        format: 'clean' (default), 'text', 'json', 'srt', 'vtt', or 'summary'.
         max_workers: Max concurrent transcriptions.
 
     Returns:

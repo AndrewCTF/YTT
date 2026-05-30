@@ -176,6 +176,40 @@ class Config:
         default_factory=lambda: _env_bool("YTT_AUTO_DOWNLOAD_CUDA", False)
     )
 
+    # ---- Local-LLM summarization (token-saving, all opt-in) ----
+    # Provider: "ollama" (default, http://localhost:11434) or "openai" (any
+    # OpenAI-compatible /v1/chat/completions endpoint, e.g. llama.cpp / LM Studio).
+    SUMMARY_PROVIDER: str = field(
+        default_factory=lambda: _env_str("YTT_SUMMARY_PROVIDER", "ollama")
+    )
+    SUMMARY_MODEL: str = field(default_factory=lambda: _env_str("YTT_SUMMARY_MODEL", "qwen3.6:27b"))
+    OLLAMA_URL: str = field(
+        default_factory=lambda: _env_str("YTT_OLLAMA_URL", "http://localhost:11434")
+    )
+    # OpenAI-compatible endpoint (used when SUMMARY_PROVIDER == "openai").
+    SUMMARY_OPENAI_BASE: str = field(
+        default_factory=lambda: _env_str("YTT_SUMMARY_OPENAI_BASE", "http://localhost:8080/v1")
+    )
+    SUMMARY_API_KEY: str = field(default_factory=lambda: _env_str("YTT_SUMMARY_API_KEY", ""))
+    SUMMARY_TIMEOUT: int = field(default_factory=lambda: _env_int("YTT_SUMMARY_TIMEOUT", 300))
+    SUMMARY_TEMPERATURE: float = field(
+        default_factory=lambda: _env_float("YTT_SUMMARY_TEMPERATURE", 0.2)
+    )
+    # Keep the model resident between calls ("hot loading"). Ollama keep_alive
+    # syntax: "5m", "30m", "1h", "-1" (forever), "0" (unload immediately).
+    SUMMARY_KEEP_ALIVE: str = field(
+        default_factory=lambda: _env_str("YTT_SUMMARY_KEEP_ALIVE", "5m")
+    )
+    # Pull the model on demand if missing (only when the user opts in).
+    SUMMARY_AUTO_PULL: bool = field(
+        default_factory=lambda: _env_bool("YTT_SUMMARY_AUTO_PULL", False)
+    )
+    # Map-reduce chunk size (chars) for long transcripts.
+    SUMMARY_MAX_INPUT_CHARS: int = field(
+        default_factory=lambda: _env_int("YTT_SUMMARY_MAX_INPUT_CHARS", 12000)
+    )
+    SUMMARY_NUM_CTX: int = field(default_factory=lambda: _env_int("YTT_SUMMARY_NUM_CTX", 8192))
+
     @property
     def proxies(self) -> dict | None:
         """requests-style proxies dict, or None when no proxy is configured."""

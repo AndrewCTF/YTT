@@ -43,7 +43,20 @@ async def main():
 asyncio.run(main())
 ```
 
-`output_format`: `clean` (default), `text`, `json`, `srt`, `vtt`.
+`output_format`: `clean` (default), `text`, `json`, `srt`, `vtt`, `summary`.
+
+## Summarize locally (save tokens)
+
+Needs a local LLM (default [Ollama](https://ollama.com)):
+
+```bash
+ollama serve && ollama pull qwen3.6:27b   # smaller: qwen3:8b, qwen3:4b, qwen3.5:2b
+ytt transcript VIDEO_ID --summarize
+```
+
+`YTT_SUMMARY_MODEL` overrides the model; `YTT_SUMMARY_KEEP_ALIVE` keeps it hot;
+`YTT_SUMMARY_AUTO_PULL=1` pulls on demand. Provider `openai` targets any
+OpenAI-compatible server via `YTT_SUMMARY_OPENAI_BASE`.
 
 ## MCP server
 
