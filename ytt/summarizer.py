@@ -246,6 +246,21 @@ def summarize_text(
         session.close()
 
 
+def generate(prompt: str, model: str | None = None, provider: str | None = None) -> str:
+    """One-shot local-LLM generation for an arbitrary prompt (used by RAG ``ask``).
+
+    Routes through the same Ollama / OpenAI-compatible backends as summarization,
+    so it stays fully local. Raises ``SummarizerError`` if the provider is down.
+    """
+    model = model or config.SUMMARY_MODEL
+    provider = (provider or config.SUMMARY_PROVIDER).lower()
+    session = _session()
+    try:
+        return _generate(prompt, model, provider, session)
+    finally:
+        session.close()
+
+
 def preload(model: str | None = None, provider: str | None = None) -> bool:
     """Hot-load the model into memory (Ollama) so the first summary is fast.
 

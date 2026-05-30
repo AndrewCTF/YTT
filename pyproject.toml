@@ -1,6 +1,6 @@
 [project]
 name = "yttranscript-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fetch, clean, and search YouTube transcripts — captions-first (rate-limit resistant) with optional Whisper fallback and an MCP server"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,6 +38,12 @@ whisper = [
 # Model Context Protocol server.
 mcp = [
     "fastmcp>=2.0.0",
+]
+# Optional local neural embeddings for higher-quality semantic search. The core
+# semantic search works with zero extra deps (pure-Python BM25 + hashing); this
+# upgrades it to dense vectors. Ollama needs no Python package (just the server).
+semantic = [
+    "sentence-transformers>=2.2.0",
 ]
 # GPU acceleration for Whisper.
 torch = [

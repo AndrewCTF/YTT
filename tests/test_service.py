@@ -27,7 +27,7 @@ def _transcript(segments_text):
 
 
 def test_captions_first_and_clean(monkeypatch):
-    def fake_fetch(video_id, language, session):
+    def fake_fetch(video_id, language, session, translate=None):
         return _transcript(["hello world this", "world this is a test"])
 
     monkeypatch.setattr(service, "fetch_transcript_innertube", fake_fetch)
@@ -40,7 +40,7 @@ def test_captions_first_and_clean(monkeypatch):
 
 
 def test_summary_format_uses_local_llm(monkeypatch):
-    def fake_fetch(video_id, language, session):
+    def fake_fetch(video_id, language, session, translate=None):
         return _transcript(["hello world this", "world this is a test"])
 
     captured = {}
@@ -69,7 +69,7 @@ def test_summary_format_uses_local_llm(monkeypatch):
 
 
 def test_whisper_fallback_when_no_captions(monkeypatch):
-    def fake_fetch(video_id, language, session):
+    def fake_fetch(video_id, language, session, translate=None):
         raise NoTranscriptFound("none")
 
     def fake_whisper(video_id):
@@ -91,7 +91,7 @@ def test_whisper_fallback_when_no_captions(monkeypatch):
 
 
 def test_no_fallback_reraises(monkeypatch):
-    def fake_fetch(video_id, language, session):
+    def fake_fetch(video_id, language, session, translate=None):
         raise NoTranscriptFound("none")
 
     monkeypatch.setattr(service, "fetch_transcript_innertube", fake_fetch)

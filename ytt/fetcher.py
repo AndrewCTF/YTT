@@ -9,6 +9,7 @@ retry/backoff in :mod:`ytt.http` — resilient to rate limiting.
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -22,9 +23,12 @@ from .http import request
 from .parser import (
     CaptionTrack,
     TimedText,
+    VideoMetadata,
     extract_video_id,
     parse_player_response,
     parse_timedtext,
+    parse_translation_languages,
+    parse_video_metadata,
 )
 
 
@@ -39,6 +43,16 @@ class TranscriptData:
     segments: list[TimedText]
     source: str = "innertube"
     is_generated: bool = False
+
+
+@dataclass
+class CaptionListing:
+    """All caption tracks available for a video, plus translation targets."""
+
+    video_id: str
+    title: str
+    tracks: list[CaptionTrack]
+    translation_languages: list[dict]
 
 
 def fetch_player_response(
@@ -100,6 +114,7 @@ def _playability_ok(player_response: dict) -> tuple[bool, str]:
 def fetch_caption_data(
     track: CaptionTrack,
     session: requests.Session | None = None,
+    translate_to: str | None = None,
 ) -> list[TimedText]:
     """Fetch and parse caption data from a caption track URL.
 
@@ -107,9 +122,24 @@ def fetch_caption_data(
     XML instead, so parsing auto-detects the format. An empty body (a common
     symptom of timedtext IP throttling) yields an empty list so callers can
     fall through to another client.
+
+    When ``translate_to`` is set, YouTube machine-translates the track into that
+    language via the ``&tlang=`` param (the same path ``yt-dlp`` uses for
+    translated subtitles) — fully server-side, no local model needed.
     """
     base_url = track.base_url
-    if "fmt=json3" not in base_url:
+    if translate_to:
+        # On signed (ANDROID_VR) caption URLs, ANY ``fmt`` param combined with
+        # ``&tlang=`` is rejected with a 429 — but ``tlang`` alone returns the
+        # translated track in its native format. Strip the baked-in ``fmt`` and
+        # add ``tlang``; parse_timedtext auto-detects json3/XML.
+        parts = urlsplit(base_url)
+        query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "fmt"]
+        query.append(("tlang", translate_to))
+        base_url = urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        )
+    elif "fmt=json3" not in base_url:
         base_url = base_url + ("&" if "?" in base_url else "?") + "fmt=json3"
 
     resp = request("GET", base_url, session=session)
@@ -143,6 +173,7 @@ def fetch_transcript_innertube(
     video_id: str,
     language: str = "en",
     session: requests.Session | None = None,
+    translate: str | None = None,
 ) -> TranscriptData:
     """Fetch a transcript from YouTube captions, trying multiple clients.
 
@@ -153,6 +184,8 @@ def fetch_transcript_innertube(
         video_id: The YouTube video ID or URL.
         language: Preferred language code (e.g. 'en', 'es', 'ja').
         session: Optional pooled session.
+        translate: Optional target language to machine-translate captions into
+            (server-side via ``&tlang=``); the source track is auto-selected.
 
     Returns:
         TranscriptData with segments and metadata.
@@ -195,7 +228,7 @@ def fetch_transcript_innertube(
 
         track = _select_track(caption_tracks, language)
         try:
-            segments = fetch_caption_data(track, session)
+            segments = fetch_caption_data(track, session, translate_to=translate)
         except Exception as e:
             last_reason = f"caption fetch failed: {e}"
             continue
@@ -206,8 +239,8 @@ def fetch_transcript_innertube(
         return TranscriptData(
             video_id=video_id,
             title=title,
-            language=track.language,
-            language_code=track.language_code,
+            language=translate or track.language,
+            language_code=translate or track.language_code,
             segments=segments,
             source="innertube",
             is_generated=track.is_generated,
@@ -215,7 +248,7 @@ def fetch_transcript_innertube(
 
     # Last resort: scrape the watch page, whose embedded player response carries
     # consent context that sometimes succeeds where the bare API is throttled.
-    watch_page_result = _fetch_via_watch_page(video_id, language, session)
+    watch_page_result = _fetch_via_watch_page(video_id, language, session, translate)
     if watch_page_result is not None:
         return watch_page_result
 
@@ -228,6 +261,7 @@ def _fetch_via_watch_page(
     video_id: str,
     language: str,
     session: requests.Session | None = None,
+    translate: str | None = None,
 ) -> TranscriptData | None:
     """Fallback: extract caption tracks from the watch page HTML.
 
@@ -283,7 +317,7 @@ def _fetch_via_watch_page(
 
     track = _select_track(tracks, language)
     try:
-        segments = fetch_caption_data(track, session)
+        segments = fetch_caption_data(track, session, translate_to=translate)
     except Exception:
         return None
     if not segments:
@@ -292,9 +326,98 @@ def _fetch_via_watch_page(
     return TranscriptData(
         video_id=video_id,
         title=title,
-        language=track.language,
-        language_code=track.language_code,
+        language=translate or track.language,
+        language_code=translate or track.language_code,
         segments=segments,
         source="innertube",
         is_generated=track.is_generated,
     )
+
+
+def list_caption_tracks(
+    video_id: str,
+    session: requests.Session | None = None,
+) -> CaptionListing:
+    """List every caption track available for a video (like ``yt-dlp --list-subs``).
+
+    Tries each Innertube client until one yields tracks, then reports the manual
+    and auto-generated tracks plus the languages YouTube can translate into.
+
+    Raises:
+        VideoUnavailable / NoTranscriptFound: if no client returns tracks.
+    """
+    actual = extract_video_id(video_id)
+    if actual is None:
+        raise ExtractionError(f"Invalid video ID or URL: {video_id}")
+    video_id = actual
+
+    title = "Unknown"
+    last_reason = "no caption tracks"
+    saw_unplayable = False
+
+    for client in INNERTUBE_CLIENTS:
+        try:
+            player_response = fetch_player_response(video_id, client, session)
+        except Exception:
+            continue
+
+        ok, reason = _playability_ok(player_response)
+        if not ok:
+            saw_unplayable = True
+            last_reason = reason
+            continue
+
+        details = player_response.get("videoDetails", {})
+        if details:
+            title = details.get("title", title)
+
+        tracks = parse_player_response(player_response)
+        if not tracks:
+            last_reason = "no caption tracks for this client"
+            continue
+
+        return CaptionListing(
+            video_id=video_id,
+            title=title,
+            tracks=tracks,
+            translation_languages=parse_translation_languages(player_response),
+        )
+
+    if saw_unplayable:
+        raise VideoUnavailable(f"Video {video_id} is unavailable: {last_reason}")
+    raise NoTranscriptFound(f"No captions found for {video_id} ({last_reason})")
+
+
+def fetch_video_metadata(
+    video_id: str,
+    session: requests.Session | None = None,
+) -> VideoMetadata:
+    """Fetch rich video metadata (title, channel, views, description, chapters).
+
+    Captions-first and audio-free — this is the data ``yt-dlp --dump-json``
+    returns, pulled from the same lightweight player response. The WEB client is
+    tried first since it carries the microformat (publish date, category).
+
+    Raises:
+        VideoUnavailable: if no client returns a playable response.
+    """
+    actual = extract_video_id(video_id)
+    if actual is None:
+        raise ExtractionError(f"Invalid video ID or URL: {video_id}")
+    video_id = actual
+
+    # WEB first: it includes the microformat block (dates/category).
+    clients = sorted(INNERTUBE_CLIENTS, key=lambda c: c["name"] != "WEB")
+    last_reason = "no playable client"
+    for client in clients:
+        try:
+            player_response = fetch_player_response(video_id, client, session)
+        except Exception:
+            continue
+        ok, reason = _playability_ok(player_response)
+        if not ok:
+            last_reason = reason
+            continue
+        if player_response.get("videoDetails"):
+            return parse_video_metadata(player_response)
+    raise VideoUnavailable(f"Could not fetch metadata for {video_id}: {last_reason}")

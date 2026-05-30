@@ -14,8 +14,16 @@ from ..config import config
 from ..cuda_dll_manager import download_cuda_dlls, setup_gpu_if_needed
 from ..search_service import search as _search
 from ..search_service import search_and_get_transcripts as _search_and_get_transcripts
+from ..search_service import search_ranked as _search_ranked
+from ..service import ask_video as _ask_video
+from ..service import corpus_stats as _corpus_stats
+from ..service import find_in_corpus as _find_in_corpus
 from ..service import get_transcript as _get_transcript
 from ..service import get_transcripts_batch as _get_transcripts_batch
+from ..service import get_video_info as _get_video_info
+from ..service import index_videos as _index_videos
+from ..service import list_languages as _list_languages
+from ..service import search_in_video as _search_in_video
 
 mcp = FastMCP("yt-transcript")
 
@@ -99,6 +107,203 @@ async def get_transcript(
     return result.content
 
 
+def _passage_dict(p) -> dict:
+    """Serialise a retrieved passage with its timestamp and deep link."""
+    return {
+        "timestamp": p.timestamp,
+        "start_seconds": int(p.start),
+        "score": p.score,
+        "text": p.text,
+        "video_id": p.video_id,
+        "title": p.title,
+        "url": p.url(),
+    }
+
+
+@mcp.tool()
+async def get_video_info(video_id: str) -> dict:
+    """Get rich video metadata (title, channel, views, description, chapters).
+
+    Captions-first and audio-free — equivalent to ``yt-dlp --dump-json`` for the
+    essentials, but without downloading the video.
+
+    Args:
+        video_id: YouTube video ID or URL.
+
+    Returns:
+        Dict with title, author, view_count, length_seconds, publish/upload date,
+        category, keywords, description, and a list of chapters.
+    """
+    try:
+        m = await _get_video_info(video_id)
+        return {
+            "success": True,
+            "video_id": m.video_id,
+            "title": m.title,
+            "author": m.author,
+            "channel_id": m.channel_id,
+            "length_seconds": m.length_seconds,
+            "view_count": m.view_count,
+            "publish_date": m.publish_date,
+            "upload_date": m.upload_date,
+            "category": m.category,
+            "keywords": m.keywords,
+            "description": m.short_description,
+            "chapters": [{"start_seconds": c.start_seconds, "title": c.title} for c in m.chapters],
+        }
+    except Exception as e:
+        return {"success": False, "video_id": video_id, "error": str(e)}
+
+
+@mcp.tool()
+async def list_caption_languages(video_id: str) -> dict:
+    """List all caption tracks and translation targets (like ``yt-dlp --list-subs``).
+
+    Args:
+        video_id: YouTube video ID or URL.
+
+    Returns:
+        Dict with the available tracks (code, language, auto/manual) and the
+        languages YouTube can machine-translate into via ``translate``.
+    """
+    try:
+        listing = await _list_languages(video_id)
+        return {
+            "success": True,
+            "video_id": listing.video_id,
+            "title": listing.title,
+            "tracks": [
+                {
+                    "code": t.language_code,
+                    "language": t.language,
+                    "auto_generated": t.is_generated,
+                }
+                for t in listing.tracks
+            ],
+            "translation_languages": listing.translation_languages,
+        }
+    except Exception as e:
+        return {"success": False, "video_id": video_id, "error": str(e)}
+
+
+@mcp.tool()
+async def search_transcript(
+    video_id: str,
+    query: str,
+    top_k: int = 5,
+    language: str = "en",
+) -> dict:
+    """Semantic search INSIDE a video — find the exact timestamped moments.
+
+    Fully local (BM25 + local embeddings if configured). Returns ranked passages
+    with timestamps and deep-link URLs straight to the moment in the video.
+
+    Args:
+        video_id: YouTube video ID or URL.
+        query: Natural-language query.
+        top_k: Number of passages to return.
+        language: Caption language.
+
+    Returns:
+        Dict with video_id, title, and a list of passages (timestamp, text, url).
+    """
+    try:
+        res = await _search_in_video(video_id, query, top_k=top_k, language=language)
+        return {
+            "success": True,
+            "video_id": res.video_id,
+            "title": res.title,
+            "query": query,
+            "passages": [_passage_dict(p) for p in res.passages],
+        }
+    except Exception as e:
+        return {"success": False, "video_id": video_id, "error": str(e)}
+
+
+@mcp.tool()
+async def ask_video(
+    video_id: str,
+    question: str,
+    top_k: int = 6,
+    language: str = "en",
+    answer: bool = True,
+) -> dict:
+    """Answer a question about a video using ONLY its transcript (local RAG).
+
+    Retrieves the most relevant timestamped passages, then (if a local LLM is
+    reachable) generates a grounded answer citing timestamps. If no LLM is
+    available, the cited passages are still returned. Nothing leaves the machine.
+
+    Args:
+        video_id: YouTube video ID or URL.
+        question: The question to answer.
+        top_k: Number of passages to retrieve as context.
+        language: Caption language.
+        answer: If False, skip the LLM and return passages only.
+
+    Returns:
+        Dict with answer (or null), the cited passages, and llm_used.
+    """
+    try:
+        res = await _ask_video(video_id, question, top_k=top_k, language=language, answer=answer)
+        return {
+            "success": True,
+            "video_id": res.video_id,
+            "title": res.title,
+            "question": question,
+            "answer": res.answer,
+            "llm_used": res.llm_used,
+            "note": res.note,
+            "passages": [_passage_dict(p) for p in res.passages],
+        }
+    except Exception as e:
+        return {"success": False, "video_id": video_id, "error": str(e)}
+
+
+@mcp.tool()
+async def index_videos(video_ids: list[str], language: str = "en") -> dict:
+    """Add videos to the local semantic corpus index for cross-video search.
+
+    Args:
+        video_ids: YouTube video IDs or URLs to index.
+        language: Caption language.
+
+    Returns:
+        Dict with the indexed videos (and chunk counts) and any failures.
+    """
+    try:
+        summary = await _index_videos(video_ids, language=language)
+        summary["success"] = True
+        return summary
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+async def find_in_corpus(query: str, top_k: int = 8) -> dict:
+    """Semantic search across ALL videos in the local corpus index (exa-style).
+
+    Args:
+        query: Natural-language query.
+        top_k: Number of passages to return.
+
+    Returns:
+        Dict with ranked passages spanning the indexed videos (each with
+        video_id, title, timestamp, and deep-link URL).
+    """
+    try:
+        hits = await _find_in_corpus(query, top_k=top_k)
+        stats = await _corpus_stats()
+        return {
+            "success": True,
+            "query": query,
+            "corpus": {"videos": stats["videos"], "chunks": stats["chunks"]},
+            "passages": [_passage_dict(p) for p in hits],
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @mcp.tool()
 async def summarize_video(
     video_id: str,
@@ -180,6 +385,7 @@ async def search_videos(
     language: str = "en",
     with_transcripts: bool = False,
     format: str = "clean",
+    rank: bool = False,
 ) -> list[dict]:
     """Search YouTube for videos matching a query.
 
@@ -189,11 +395,28 @@ async def search_videos(
         language: Language code for transcripts (e.g., 'en', 'es').
         with_transcripts: If True, also fetch transcripts for each video.
         format: Transcript format when with_transcripts is True ('clean' default).
+        rank: If True, neural re-rank results by how well each video's TRANSCRIPT
+            (not just its title) answers the query — fully local. Adds a
+            ``relevance`` score to each result.
 
     Returns:
         List of video results with video_id, title, channel_name, duration,
-        view_count, and (optionally) transcript content.
+        view_count, and (optionally) transcript content / relevance score.
     """
+    if rank:
+        ranked = await _search_ranked(query, max_results=max_results, language=language)
+        return [
+            {
+                "video_id": v.video_id,
+                "title": v.title,
+                "channel_name": v.channel_name,
+                "duration": v.duration,
+                "view_count": v.view_count,
+                "relevance": round(float(score), 4),
+            }
+            for v, score in ranked
+        ]
+
     if with_transcripts:
         results = await _search_and_get_transcripts(
             query, max_results=max_results, language=language, output_format=format

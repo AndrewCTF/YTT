@@ -210,6 +210,18 @@ class Config:
     )
     SUMMARY_NUM_CTX: int = field(default_factory=lambda: _env_int("YTT_SUMMARY_NUM_CTX", 8192))
 
+    # ---- Semantic search / embeddings (fully local, all opt-in) ----
+    # Provider: "auto" (sentence-transformers if installed, else dependency-free
+    # hashing embedder), "hash", "sentence-transformers", "ollama", or "openai".
+    EMBED_PROVIDER: str = field(default_factory=lambda: _env_str("YTT_EMBED_PROVIDER", "auto"))
+    EMBED_MODEL: str = field(default_factory=lambda: _env_str("YTT_EMBED_MODEL", ""))
+    EMBED_HASH_DIM: int = field(default_factory=lambda: _env_int("YTT_EMBED_HASH_DIM", 256))
+    # Chunking for retrieval (chars per window, with overlap for context bleed).
+    CHUNK_TARGET_CHARS: int = field(default_factory=lambda: _env_int("YTT_CHUNK_CHARS", 480))
+    CHUNK_OVERLAP_CHARS: int = field(default_factory=lambda: _env_int("YTT_CHUNK_OVERLAP", 80))
+    # Local corpus index (cross-video semantic search).
+    INDEX_DB_PATH: str = field(default_factory=lambda: _env_str("YTT_INDEX_DB", ".ytt_index.db"))
+
     @property
     def proxies(self) -> dict | None:
         """requests-style proxies dict, or None when no proxy is configured."""

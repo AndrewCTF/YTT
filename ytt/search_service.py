@@ -1,13 +1,16 @@
 """High-level search service orchestrator."""
 
 import asyncio
+from functools import partial
 from typing import Optional
 
+from .embeddings import get_embedder
 from .http import new_session
 from .rate_limiter import rate_limiter
 from .search_cache import search_cache, CachedSearchResult
 from .searcher import VideoSearchResult, search_videos_innertube
-from .service import get_transcript, ServiceResult
+from .semantic import relevance_score
+from .service import get_transcript, get_transcript_data, ServiceResult
 
 
 async def search(
@@ -57,6 +60,52 @@ async def search(
         await search_cache.set(query, results)
 
     return results
+
+
+async def search_ranked(
+    query: str,
+    max_results: int = 5,
+    pool: int | None = None,
+    language: str = "en",
+    use_cache: bool = True,
+    embed_provider: str | None = None,
+    embed_model: str | None = None,
+) -> list[tuple[VideoSearchResult, float]]:
+    """Neural re-ranking of search results by *transcript* relevance (exa-style).
+
+    YouTube's keyword search returns a candidate ``pool``; we fetch each
+    transcript and score how well its *content* (not just its title) answers the
+    query using a shared local embedder, then return the best ``max_results``
+    with their relevance scores. Fully local. Videos without transcripts sink to
+    the bottom (score 0) rather than being dropped.
+    """
+    pool = pool or max(max_results * 3, max_results)
+    results = await search(query, max_results=pool, use_cache=use_cache)
+    if not results:
+        return []
+
+    try:
+        embedder = get_embedder(embed_provider, embed_model)
+    except Exception:
+        embedder = get_embedder("hash")
+
+    loop = asyncio.get_event_loop()
+
+    async def score_one(r: VideoSearchResult) -> float:
+        try:
+            transcript, _ = await get_transcript_data(r.video_id, language, None, use_cache)
+        except Exception:
+            return 0.0
+        try:
+            return await loop.run_in_executor(
+                None, partial(relevance_score, transcript.segments, query, embedder)
+            )
+        except Exception:
+            return 0.0
+
+    scores = await asyncio.gather(*[score_one(r) for r in results])
+    ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
+    return ranked[:max_results]
 
 
 def _cached_to_search_result(cached: CachedSearchResult) -> VideoSearchResult:

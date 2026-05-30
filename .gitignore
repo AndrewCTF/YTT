@@ -1,5 +1,7 @@
 .transcript_cache.db
-_pycache__/
+.ytt_index.db
+.search_cache.db
+__pycache__/
 .tmp/
 .venv/
 .claude/settings.local.json
